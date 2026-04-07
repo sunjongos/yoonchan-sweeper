@@ -38,13 +38,16 @@ class AntiDetection:
         sigma = self.cfg.get("jitter_max", 0.12) * 0.4
         return max(0.03, base + random.gauss(0, sigma))
 
-    # ── 피로도 배율 (1.0 → 최대 1.35) ───────────────────────
+    # ── 피로도 배율 (1.0 → 최대 1.45) ───────────────────────
     def fatigue_factor(self) -> float:
         if not self.cfg.get("fatigue_mode", True):
             return 1.0
-        elapsed = time.time() - self._start
-        # 30분 이상 사용 시 최대 35% 느려짐
-        return 1.0 + min(elapsed / 5400.0, 0.35)
+        import datetime
+        elapsed_min = (time.time() - self._start) / 60.0
+        hour = datetime.datetime.now().hour
+        # 야간(22시~6시)은 피로도 더 빠르게 축적 (더 자연스럽게 느려짐)
+        rate = 0.0025 if (hour >= 22 or hour < 6) else 0.0015
+        return min(1.45, 1.0 + elapsed_min * rate)
 
     # ── 확률적 일시 정지 ─────────────────────────────────────
     def should_pause(self) -> bool:
@@ -187,6 +190,24 @@ class MovementEngine:
             pyautogui.moveRel(ox, oy, duration=0.15)
             time.sleep(random.uniform(0.1, 0.3))
             pyautogui.moveRel(-ox, -oy, duration=0.15)
+
+    # ── 베지에 커브 슬립 (cubic smoothstep: 3t²-2t³) ────────────
+    @staticmethod
+    def _bezier_sleep(total: float, steps: int = 20):
+        """
+        총 시간을 cubic smoothstep으로 분배:
+        f(t) = 3t² - 2t³  — 시작/끝 느리고 중간 빠름 (자연스러운 가속·감속)
+        """
+        if total <= 0:
+            return
+        steps = max(5, int(total / 0.04))
+        prev_f = 0.0
+        for i in range(1, steps + 1):
+            t = i / steps
+            f = 3 * t**2 - 2 * t**3   # cubic smoothstep
+            delta = f - prev_f
+            prev_f = f
+            time.sleep(max(0.0, total * delta))
 
     # ── 모든 키 해제 ─────────────────────────────────────────
     def release_all(self):
