@@ -186,7 +186,10 @@ class Dashboard:
 
             @app.route("/api/stats")
             def stats():
-                return jsonify(state.snapshot())
+                snap = state.snapshot()
+                # JS 타이머용 elapsed_seconds 추가
+                snap["elapsed_seconds"] = round(state.stats.elapsed(), 1)
+                return jsonify(snap)
 
             @app.route("/api/config")
             def config():
