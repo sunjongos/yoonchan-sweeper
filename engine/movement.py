@@ -116,14 +116,13 @@ class MovementEngine:
             time.sleep(total * d / s)
 
     # ── 메인 이동 ─────────────────────────────────────────────
-    def move(self, direction: str, duration: float,
+    def move(self, direction, duration: float,
              do_interact: bool = True, do_jump: bool = True):
         """
-        방향키를 duration초 누르면서 F키 / 점프 병행.
-        베지에 타이밍 + 지터 적용.
+        방향키(단일 문자열 혹은 리스트)를 duration초 누르면서 상호작용/점프 병행.
+        다방향 이동 (대각선 등) 지원.
         """
         from engine.state import MacroState
-        # 전역 state 참조 (순환 임포트 방지를 위해 지연 임포트)
         import importlib
         state_mod = importlib.import_module("engine.state")
 
@@ -133,21 +132,22 @@ class MovementEngine:
         last_pick = time.time()
         last_jump = time.time()
 
-        keyboard.press(direction)
+        dirs = [direction] if isinstance(direction, str) else direction
+        for d in dirs:
+            keyboard.press(d)
+            
         t0 = time.time()
 
         try:
             while time.time() - t0 < duration:
-                # stop 체크는 호출측 책임 (modes.py의 stopped() 체크)
                 now = time.time()
 
                 if do_interact and now - last_pick >= self.ad.jitter(ii):
-                    keyboard.press_and_release("f")
+                    keyboard.press_and_release("e")
                     last_pick = now
-                    # 피로도 적용 후 간헐적 추가 픽업
                     if random.random() < 0.08:
                         time.sleep(self.ad.jitter(0.05))
-                        keyboard.press_and_release("f")
+                        keyboard.press_and_release("e")
 
                 if do_jump and ji > 0 and now - last_jump >= self.ad.jitter(ji):
                     keyboard.press_and_release("space")
@@ -156,17 +156,48 @@ class MovementEngine:
                 time.sleep(0.04)
 
         finally:
-            keyboard.release(direction)
+            for d in dirs:
+                keyboard.release(d)
 
         # 가끔 산만한 동작
         if self.ad.should_pause():
             self.simulate_distraction()
 
+    # ── 주변 둘러보기 (오가닉 스티어링) ─────────────────────────
+    def smooth_look(self, max_offset=250, duration=0.8):
+        """기계적인 확 꺾임을 방지하고, S자를 그리듯 부드럽게 시야 확보"""
+        import pyautogui
+        import math
+        try:
+            sw, sh = pyautogui.size()
+            cx, cy = sw // 2, sh // 2
+            
+            # 랜덤 이동폭 (너무 크지 않게, 좌/우 중 랜덤)
+            ox = random.choice([-1, 1]) * random.randint(int(max_offset * 0.5), max_offset)
+            oy = random.randint(-15, 15)  # 상하 움직임은 최소화
+            
+            pyautogui.FAILSAFE = False
+            # 먼저 화면 중심으로 커서 안착 (이동 과정 생략, 즉시 이동)
+            pyautogui.moveTo(cx, cy)
+            
+            # 우클릭으로 부드럽게 드래그하며 스티어링
+            pyautogui.mouseDown(button='right')
+            # 꿀렁이는 느낌을 주어 진짜 사람이 마우스를 돌리는 듯한 가감속 적용
+            pyautogui.moveRel(ox, oy, duration=duration, tween=pyautogui.easeInOutQuad)
+            pyautogui.mouseUp(button='right')
+            
+            # 마우스 이탈을 막기 위해 다시 안보이게 센터로
+            pyautogui.moveTo(cx, cy)
+            
+            pyautogui.FAILSAFE = self.cfg.get("failsafe", True)
+        except Exception as e:
+            log.warning("시야 회전 중 오류: %s", e)
+
     # ── 연속 픽업 ─────────────────────────────────────────────
     def burst_interact(self, count: int = 3):
         """F키를 count회 빠르게 연타"""
         for _ in range(count):
-            keyboard.press_and_release("f")
+            keyboard.press_and_release("e")
             time.sleep(self.ad.jitter(0.11))
 
     # ── 인간 일시 정지 ────────────────────────────────────────

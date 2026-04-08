@@ -14,7 +14,7 @@ LOG_DIR     = BASE_DIR
 
 # ── 기본 설정 ────────────────────────────────────────────
 DEFAULT_CFG: dict = {
-    "mode": "SWEEP",
+    "mode": "BEAST",
 
     # 이동/픽업
     "interact_interval":  0.20,
@@ -123,7 +123,7 @@ class Stats:
 
 
 # ── 공유 상태 ─────────────────────────────────────────────
-MODES = ["SWEEP", "SPIRAL", "GRID", "RANDOM", "VISION", "SMART"]
+MODES = ["SWEEP", "SPIRAL", "GRID", "RANDOM", "VISION", "SMART", "BEAST"]
 
 class MacroState:
     def __init__(self):

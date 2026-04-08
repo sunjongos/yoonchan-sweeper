@@ -19,6 +19,7 @@
   RANDOM  랜덤 이동 (봇 감지 우회)
   VISION  화면 색상 감지 아이템 추적
   SMART   VISION + SWEEP 자동 전환 혼합 ★최고급★
+  BEAST   World Best Practice 인간형 하드코어 모드 🔥
 
 단축키:
   F9   시작/중지  |  F8 모드 전환  |  F7 통계
@@ -30,6 +31,9 @@
 # ── 임포트 ──────────────────────────────────────────────────
 import sys, os, time, threading, logging
 from datetime import timedelta
+
+if sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
 
 # engine 패키지를 경로에 추가
 _BASE = os.path.dirname(os.path.abspath(__file__))
@@ -141,7 +145,7 @@ class _FallbackMovement:
                 if state.stop.is_set(): break
                 now = time.time()
                 if do_interact and now - last_pick >= self.jitter(cfg["interact_interval"]):
-                    keyboard.press_and_release("f")
+                    keyboard.press_and_release("e")
                     state.add_pickup()
                     last_pick = now
                 ji = cfg["jump_interval"]
@@ -154,7 +158,7 @@ class _FallbackMovement:
 
     def burst_interact(self, count: int = 3):
         for _ in range(count):
-            keyboard.press_and_release("f")
+            keyboard.press_and_release("e")
             state.add_pickup()
             time.sleep(self.jitter(0.12))
 
@@ -213,7 +217,7 @@ class _FallbackVision:
 # ── 매크로 러너 선택 ─────────────────────────────────────────
 def _get_runner(mode: str):
     from engine.modes import (run_sweep, run_spiral, run_grid,
-                               run_random, run_vision, run_smart)
+                               run_random, run_vision, run_smart, run_beast)
     runners = {
         "SWEEP":  lambda: run_sweep(state, _mv),
         "SPIRAL": lambda: run_spiral(state, _mv),
@@ -221,6 +225,7 @@ def _get_runner(mode: str):
         "RANDOM": lambda: run_random(state, _mv),
         "VISION": lambda: run_vision(state, _mv, _ve),
         "SMART":  lambda: run_smart(state, _mv, _ve),
+        "BEAST":  lambda: run_beast(state, _mv, _ve),
     }
     return runners.get(mode, runners["SWEEP"])
 
@@ -232,7 +237,7 @@ def _macro_worker():
 
     # Anti-AFK
     if state.cfg["anti_afk"]:
-        AntiAFKWorker(state).start()
+        AntiAFKWorker(state, _ve).start()
 
     try:
         runner = _get_runner(state.mode)
@@ -341,7 +346,7 @@ def _print_banner():
     cp("  단축키", C.YLW, bold=True)
     print("  " + "─"*48)
     for k, desc in [
-        ("F9 ","시작 / 중지"),("F8 ","모드 순환 (SWEEP→SPIRAL→GRID→RANDOM→VISION→SMART)"),
+        ("F9 ","시작 / 중지"),("F8 ","모드 순환 (SWEEP→SPIRAL→GRID→RANDOM→VISION→SMART→BEAST)"),
         ("F7 ","실시간 통계"),("F6 ","설정 출력"),
         ("F5 ","웹 대시보드 열기"),("F10","완전 종료"),
     ]:
@@ -349,6 +354,7 @@ def _print_banner():
     print()
     cp(f"  현재 모드  : {state.mode}", C.YLW, bold=True)
     cp(f"  SMART 모드 : Vision + Sweep 자동 전환 ★", C.MGT)
+    cp(f"  BEAST 모드 : World Best Practice 곡선 주행 및 카메라 휙휙 🔥", C.RED)
     cp(f"  Dashboard  : http://localhost:{state.cfg.get('dashboard_port',7777)}", C.CYN)
     cp(f"  Vision     : {'사용 가능' if VisionEngine or True else '불가'}", C.WHT)
     cp(f"  Anti-AFK   : {'ON' if state.cfg['anti_afk'] else 'OFF'}", C.WHT)

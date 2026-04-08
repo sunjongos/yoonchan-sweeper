@@ -34,6 +34,8 @@ class ItemDetection:
     pixel_count:    int
     confidence:     float          # 0.0 ~ 1.0
     direction_hint: str            # w/a/s/d
+    dx:             int  = 0
+    dy:             int  = 0
 
     def __repr__(self):
         return (f"<ItemDetection {self.name} @ ({self.x},{self.y}) "
@@ -98,18 +100,26 @@ class VisionEngine:
         g_lo, g_hi = color_def["g"]
         b_lo, b_hi = color_def["b"]
 
+        # [최적화] 스캔 속도를 4배 이상 높이기 위해 배열에 다운샘플링(Stride=2) 적용
+        scale = 2
+        scaled_frame = frame[::scale, ::scale]
+
         mask = (
-            (frame[:,:,0] >= r_lo) & (frame[:,:,0] <= r_hi) &
-            (frame[:,:,1] >= g_lo) & (frame[:,:,1] <= g_hi) &
-            (frame[:,:,2] >= b_lo) & (frame[:,:,2] <= b_hi)
+            (scaled_frame[:,:,0] >= r_lo) & (scaled_frame[:,:,0] <= r_hi) &
+            (scaled_frame[:,:,1] >= g_lo) & (scaled_frame[:,:,1] <= g_hi) &
+            (scaled_frame[:,:,2] >= b_lo) & (scaled_frame[:,:,2] <= b_hi)
         )
-        count = int(np.sum(mask))
+        # 스케일 복원 적용
+        count = int(np.sum(mask)) * (scale * scale)
         min_px = self.cfg.get("vision_min_pixels", 20)
         if count < min_px:
             return None
 
-        # 가장 큰 클러스터 찾기
-        cx, cy, cluster_count = self._nearest_cluster(mask)
+        # 가장 큰 클러스터 찾기 (scaled 좌표계)
+        cx_s, cy_s, cluster_count_s = self._nearest_cluster(mask, scale)
+        cx = cx_s * scale
+        cy = cy_s * scale
+        cluster_count = cluster_count_s * (scale * scale)
 
         # 신뢰도: 픽셀 수 기반 (최대 500px 기준 정규화)
         confidence = min(cluster_count / 500.0, 1.0)
@@ -127,14 +137,19 @@ class VisionEngine:
             pixel_count=cluster_count,
             confidence=confidence,
             direction_hint=direction,
+            dx=int(cx - self._cx),
+            dy=int(cy - self._cy),
         )
 
     # ── 클러스터 중심 ─────────────────────────────────────────
-    def _nearest_cluster(self, mask: np.ndarray) -> Tuple[int, int, int]:
+    def _nearest_cluster(self, mask: np.ndarray, scale: int = 1) -> Tuple[int, int, int]:
         """
         마스크에서 화면 중심에 가장 가까운 클러스터의 (cx, cy, count) 반환.
         OpenCV 사용 가능 시 connected components, 없으면 단순 무게중심.
         """
+        center_x = self._cx // scale
+        center_y = self._cy // scale
+
         if _CV2_OK:
             try:
                 m8 = mask.astype(np.uint8) * 255
@@ -149,10 +164,10 @@ class VisionEngine:
                 for lbl in range(1, n):
                     cx_l, cy_l = centroids[lbl]
                     area = stats[lbl, cv2.CC_STAT_AREA]
-                    if area < 5:
+                    if area < max(1, 5 // (scale*scale)):
                         continue
-                    dist = math.hypot(cx_l - self._cx, cy_l - self._cy)
-                    # 거리 ÷ 면적의 sqrt로 가중 점수 (크고 가까울수록 우선)
+                    dist = math.hypot(cx_l - center_x, cy_l - center_y)
+                    # 거리 ÷ 면적의 기하평균으로 거리에 엄청난 가중치를 부여 (Center-bias)
                     score = dist / (math.sqrt(area) + 1e-6)
                     if score < best_dist:
                         best_dist  = score
@@ -221,5 +236,22 @@ class VisionEngine:
             changed_px = int(np.sum(diff.max(axis=2) > 40))
             self._prev_frame = curr
             return changed_px > 500
+        except Exception:
+            return False
+
+    def is_stuck(self) -> bool:
+        """
+        프레임 간 픽셀 변화량이 비정상적으로 적으면(예: 30픽셀 이상 차이나는 픽셀이 100개 미만)
+        벽이나 계단에 끼어 화면이 멈춘 상태(Stuck)로 간주합니다.
+        """
+        if not _PIL_OK or self._prev_frame is None:
+            return False
+        try:
+            curr = self._grab()
+            if curr is None: return False
+            diff = np.abs(curr.astype(int) - self._prev_frame.astype(int))
+            changed_px = int(np.sum(diff.max(axis=2) > 30))
+            self._prev_frame = curr
+            return changed_px < 20 # 텍스처 없는 평지에서도 오작동하지 않도록 임계값 대폭 완화
         except Exception:
             return False
